@@ -8,7 +8,7 @@ This project is extracted from the old `jme3-android-native` module so the Andro
 implementation "org.jmonkeyengine:jme3-android-native:<version>"
 ```
 
-`./gradlew assemble` builds the native libraries from source and packages them into the jar. An Android NDK and CMake must be available.
+`./gradlew assemble` builds the native libraries from source and packages them into an Android AAR. An Android SDK, Android NDK, and CMake must be available.
 
 Native build targets are configured in `gradle.properties`:
 

@@ -53,11 +53,11 @@ jobs:
           fi
           ./gradlew $version_args --no-daemon assemble --console=plain --stacktrace
 
-      - name: Upload Maven-ready jar outputs
+      - name: Upload AAR output
         uses: actions/upload-artifact@v7.0.1
         with:
-          name: build-libs
-          path: build/libs
+          name: aar
+          path: build/outputs/aar
 
   PublishSnapshot:
     name: Deploy Snapshot
@@ -147,9 +147,6 @@ jobs:
               -PsigningPassword='${{ secrets.SIGNING_PASSWORD }}' \
               -PreleaseVersion=${GITHUB_REF_NAME#v} \
               --console=plain --stacktrace
-            .github/actions/tools/uploadToCentral.sh \
-              -p '${{ secrets.OSSRH_PASSWORD }}' \
-              -u '${{ secrets.OSSRH_USERNAME }}'
           fi
 
       - name: Publish to GitHub Packages
@@ -157,18 +154,17 @@ jobs:
           export ANDROID_NDK="$ANDROID_SDK_ROOT/ndk/$ANDROID_NDK_VERSION"
           if [ "${{ secrets.SIGNING_PASSWORD }}" = "" ];
           then
-            ./gradlew publishMavenPublicationToDistRepository \
+            ./gradlew publishMavenPublicationToGitHubPackagesRepository \
               -PreleaseVersion=${GITHUB_REF_NAME#v} \
+              -PgithubPackagesUsername='${{ github.actor }}' \
+              -PgithubPackagesPassword='${{ secrets.GITHUB_TOKEN }}' \
               --console=plain --stacktrace
           else
-            ./gradlew publishMavenPublicationToDistRepository \
+            ./gradlew publishMavenPublicationToGitHubPackagesRepository \
               -PsigningKey='${{ secrets.SIGNING_KEY }}' \
               -PsigningPassword='${{ secrets.SIGNING_PASSWORD }}' \
               -PreleaseVersion=${GITHUB_REF_NAME#v} \
+              -PgithubPackagesUsername='${{ github.actor }}' \
+              -PgithubPackagesPassword='${{ secrets.GITHUB_TOKEN }}' \
               --console=plain --stacktrace
           fi
-
-          source .github/actions/tools/uploadToMaven.sh
-          registry="https://maven.pkg.github.com/$GITHUB_REPOSITORY"
-          echo "Deploy to github package registry $registry"
-          uploadAllToMaven build/dist/maven/ "$registry" "token" "${{ secrets.GITHUB_TOKEN }}"

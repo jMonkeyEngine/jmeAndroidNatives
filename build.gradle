@@ -1,6 +1,6 @@
 plugins {
     id 'base'
-    id 'java-library'
+    id 'com.android.library' version '9.1.0'
     id 'maven-publish'
     id 'signing'
 }
@@ -16,6 +16,7 @@ base {
 }
 
 ext {
+    androidCompileSdk = providers.gradleProperty('androidCompileSdk').getOrElse('36').trim().toInteger()
     androidAbis = providers.gradleProperty('androidAbis')
             .getOrElse('arm64-v8a,x86_64')
             .split(',')
@@ -32,24 +33,40 @@ if (androidAbis.isEmpty()) {
 if (!androidPlatform.startsWith('android-')) {
     throw new GradleException("androidPlatform must look like 'android-21', but was '${androidPlatform}'.")
 }
+def androidMinSdk = androidPlatform.replaceFirst(/^android-/, '').toInteger()
 
 repositories {
     mavenCentral()
     google()
 }
 
-java {
-    sourceCompatibility = JavaVersion.VERSION_1_8
-    targetCompatibility = JavaVersion.VERSION_1_8
-    toolchain {
-        languageVersion = JavaLanguageVersion.of(21)
-        vendor = JvmVendorSpec.ADOPTIUM
+def generatedJniLibsDir = layout.buildDirectory.dir('generated/jniLibs')
+
+android {
+    namespace = 'org.jmonkeyengine.android.natives'
+    compileSdk = androidCompileSdk
+
+    defaultConfig {
+        minSdk = androidMinSdk
     }
+
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_1_8
+        targetCompatibility = JavaVersion.VERSION_1_8
+    }
+
+    sourceSets {
+        main {
+            manifest.srcFile 'src/main/AndroidManifest.xml'
+            java.srcDirs = []
+            jniLibs.srcDir generatedJniLibsDir.get().asFile
+        }
+    }
+
 }
 
 tasks.withType(JavaCompile).configureEach {
     options.encoding = 'UTF-8'
-    options.release = 8
 }
 
 def findAndroidNdkDirs(File sdkDir) {
@@ -116,23 +133,6 @@ tasks.register('validateAndroidNdk') {
     }
 }
 
-sourceSets {
-    main {
-        java {
-            srcDirs = []
-        }
-    }
-}
-
-jar {
-    manifest {
-        attributes 'Implementation-Title': 'jmeAndroidNatives',
-                   'Implementation-Version': project.version,
-                   'Automatic-Module-Name': 'org.jmonkeyengine.android.natives',
-                   'Created-By': "${JavaVersion.current()} (${System.getProperty('java.vendor')})"
-    }
-}
-
 tasks.register('sourcesJar', Jar) {
     archiveClassifier = 'sources'
     from 'src/native'
@@ -149,40 +149,53 @@ tasks.named('assemble') {
     dependsOn tasks.named('sourcesJar'), tasks.named('javadocJar')
 }
 
-publishing {
-    publications {
-        maven(MavenPublication) {
-            artifactId = 'jme3-android-native'
-            from components.java
-            artifact tasks.named('sourcesJar')
-            artifact tasks.named('javadocJar')
-            pom {
-                name = POM_NAME
-                description = POM_DESCRIPTION
-                url = POM_URL
-                inceptionYear = POM_INCEPTION_YEAR
-                scm {
-                    url = POM_SCM_URL
-                    connection = POM_SCM_CONNECTION
-                    developerConnection = POM_SCM_DEVELOPER_CONNECTION
-                }
-                licenses {
-                    license {
-                        name = POM_LICENSE_NAME
-                        url = POM_LICENSE_URL
-                        distribution = POM_LICENSE_DISTRIBUTION
-                    }
-                }
-                developers {
-                    developer {
-                        id = 'jMonkeyEngine'
-                        name = 'jMonkeyEngine Team'
-                    }
+tasks.register('syncNativeLibraries', Sync) {
+    dependsOn tasks.named('buildOpenAlSoftNativeLib'), tasks.named('buildBufferAllocatorNativeLib')
+    from(layout.buildDirectory.dir('openalsoft/libs'))
+    from(layout.buildDirectory.dir('bufferallocator/libs'))
+    into generatedJniLibsDir
+    doLast {
+        androidAbis.each { abi ->
+            ['libopenalsoftjme.so', 'libbufferallocatorjme.so'].each { libName ->
+                def nativeLib = generatedJniLibsDir.get().file("${abi}/${libName}").asFile
+                if (!nativeLib.isFile()) {
+                    throw new GradleException("Missing native library for AAR: ${nativeLib}")
                 }
             }
         }
     }
+}
 
+tasks.matching { it.name.endsWith('JniLibFolders') }.configureEach {
+    dependsOn tasks.named('syncNativeLibraries')
+}
+
+def configurePom = {
+    name = POM_NAME
+    description = POM_DESCRIPTION
+    url = POM_URL
+    inceptionYear = POM_INCEPTION_YEAR
+    scm {
+        url = POM_SCM_URL
+        connection = POM_SCM_CONNECTION
+        developerConnection = POM_SCM_DEVELOPER_CONNECTION
+    }
+    licenses {
+        license {
+            name = POM_LICENSE_NAME
+            url = POM_LICENSE_URL
+            distribution = POM_LICENSE_DISTRIBUTION
+        }
+    }
+    developers {
+        developer {
+            id = 'jMonkeyEngine'
+            name = 'jMonkeyEngine Team'
+        }
+    }
+}
+
+publishing {
     repositories {
         maven {
             name = 'Dist'
@@ -204,6 +217,41 @@ publishing {
             name = 'SNAPSHOT'
             url = 'https://central.sonatype.com/repository/maven-snapshots/'
         }
+        maven {
+            name = 'GitHubPackages'
+            url = uri("https://maven.pkg.github.com/${providers.environmentVariable('GITHUB_REPOSITORY').getOrElse('jMonkeyEngine/jmeAndroidNatives')}")
+            credentials {
+                username = providers.gradleProperty('githubPackagesUsername')
+                        .orElse(providers.environmentVariable('GITHUB_ACTOR'))
+                        .getOrElse('Unknown user')
+                password = providers.gradleProperty('githubPackagesPassword')
+                        .orElse(providers.environmentVariable('GITHUB_TOKEN'))
+                        .getOrElse('Unknown password')
+            }
+        }
+    }
+}
+
+afterEvaluate {
+    publishing {
+        publications {
+            maven(MavenPublication) {
+                artifactId = 'jme3-android-native'
+                artifact(tasks.named('bundleReleaseAar')) {
+                    extension = 'aar'
+                }
+                artifact tasks.named('sourcesJar')
+                artifact tasks.named('javadocJar')
+                pom configurePom
+            }
+        }
+    }
+
+    signing {
+        def signingKey = gradle.rootProject.findProperty('signingKey')
+        def signingPassword = gradle.rootProject.findProperty('signingPassword')
+        useInMemoryPgpKeys(signingKey, signingPassword)
+        sign publishing.publications.maven
     }
 }
 
@@ -213,13 +261,6 @@ publishToMavenLocal.doLast {
 
 tasks.register('install') {
     dependsOn 'publishToMavenLocal'
-}
-
-signing {
-    def signingKey = gradle.rootProject.findProperty('signingKey')
-    def signingPassword = gradle.rootProject.findProperty('signingPassword')
-    useInMemoryPgpKeys(signingKey, signingPassword)
-    sign publishing.publications.maven
 }
 
 tasks.withType(Sign).configureEach {

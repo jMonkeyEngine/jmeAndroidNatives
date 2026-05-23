@@ -33,15 +33,3 @@ task buildBufferAllocatorNativeLib(type: Exec, dependsOn: [copyJmeBufferAllocato
         "-j${Runtime.runtime.availableProcessors()}"
     )
 }
-compileJava.dependsOn buildBufferAllocatorNativeLib
-
-// package the native object files inside the lib folder in a production jar
-jar.into("lib") { from bufferAllocatorBuildLibsDir }
-jar.doFirst {
-    rootProject.ext.androidAbis.each { abi ->
-        def nativeLib = file("${bufferAllocatorBuildLibsDir}/${abi}/libbufferallocatorjme.so")
-        if (!nativeLib.isFile()) {
-            throw new GradleException("Missing buffer allocator native library: ${nativeLib}. Run assemble with an Android NDK available.")
-        }
-    }
-}

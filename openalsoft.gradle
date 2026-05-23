@@ -170,18 +170,6 @@ task buildOpenAlSoftNativeLib(type: Exec) {
         "-j${Runtime.runtime.availableProcessors()}"
     )
 }
-compileJava.dependsOn buildOpenAlSoftNativeLib
-
-jar.into("lib") { from openalsoftBuildLibsDir }
-jar.doFirst {
-    rootProject.ext.androidAbis.each { abi ->
-        def nativeLib = file("${openalsoftBuildLibsDir}/${abi}/libopenalsoftjme.so")
-        if (!nativeLib.isFile()) {
-            throw new GradleException("Missing OpenAL Soft native library: ${nativeLib}. Run assemble with an Android NDK and CMake available.")
-        }
-    }
-}
-
 // Helper class to wrap ant download task
 class MyDownload extends DefaultTask {
     @Input
