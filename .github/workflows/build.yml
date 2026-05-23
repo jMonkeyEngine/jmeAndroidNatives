@@ -1,0 +1,170 @@
+name: Build jmeAndroidNatives
+
+on:
+  push:
+    branches:
+      - master
+      - main
+  pull_request:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  BuildAndroidNatives:
+    name: Build Android natives
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/cirruslabs/android-sdk:36-ndk
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+
+      - name: Setup Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Install CMake
+        run: |
+          apt-get update
+          apt-get install -y cmake
+          cmake --version
+
+      - name: Validate the Gradle wrapper
+        uses: gradle/actions/wrapper-validation@v6.1.0
+
+      - name: Build
+        run: |
+          export ANDROID_NDK="$ANDROID_SDK_ROOT/ndk/$ANDROID_NDK_VERSION"
+          version_args=""
+          if [ "$GITHUB_EVENT_NAME" = "release" ]; then
+            version_args="-PreleaseVersion=${GITHUB_REF_NAME#v}"
+          fi
+          ./gradlew $version_args --no-daemon assemble --console=plain --stacktrace
+
+      - name: Upload Maven-ready jar outputs
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: build-libs
+          path: build/libs
+
+  PublishSnapshot:
+    name: Deploy Snapshot
+    needs: [BuildAndroidNatives]
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/cirruslabs/android-sdk:36-ndk
+    if: github.event_name == 'push' && (github.ref_name == 'master' || github.ref_name == 'main')
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+
+      - name: Setup Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Install CMake
+        run: |
+          apt-get update
+          apt-get install -y cmake
+          cmake --version
+
+      - name: Publish snapshot to Sonatype
+        run: |
+          if [ "${{ secrets.CENTRAL_PASSWORD }}" = "" ];
+          then
+            echo "Configure the following secrets to enable uploading to Sonatype:"
+            echo "CENTRAL_PASSWORD, CENTRAL_USERNAME, SIGNING_KEY, SIGNING_PASSWORD"
+          else
+            export ANDROID_NDK="$ANDROID_SDK_ROOT/ndk/$ANDROID_NDK_VERSION"
+            ./gradlew publishMavenPublicationToSNAPSHOTRepository \
+              -PcentralPassword=${{ secrets.CENTRAL_PASSWORD }} \
+              -PcentralUsername=${{ secrets.CENTRAL_USERNAME }} \
+              -PsigningKey='${{ secrets.SIGNING_KEY }}' \
+              -PsigningPassword='${{ secrets.SIGNING_PASSWORD }}' \
+              --console=plain --stacktrace
+          fi
+
+  PublishRelease:
+    name: Deploy Release
+    needs: [BuildAndroidNatives]
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/cirruslabs/android-sdk:36-ndk
+    if: github.event_name == 'release'
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+
+      - name: Setup Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Install CMake
+        run: |
+          apt-get update
+          apt-get install -y cmake
+          cmake --version
+
+      - name: Stage release artifacts for Central
+        run: |
+          if [ "${{ secrets.CENTRAL_PASSWORD }}" = "" ];
+          then
+            echo "Configure the following secrets to enable uploading to Sonatype:"
+            echo "CENTRAL_PASSWORD, CENTRAL_USERNAME, SIGNING_KEY, SIGNING_PASSWORD"
+          else
+            export ANDROID_NDK="$ANDROID_SDK_ROOT/ndk/$ANDROID_NDK_VERSION"
+            ./gradlew publishMavenPublicationToCentralRepository \
+              -PcentralPassword=${{ secrets.CENTRAL_PASSWORD }} \
+              -PcentralUsername=${{ secrets.CENTRAL_USERNAME }} \
+              -PsigningKey='${{ secrets.SIGNING_KEY }}' \
+              -PsigningPassword='${{ secrets.SIGNING_PASSWORD }}' \
+              -PreleaseVersion=${GITHUB_REF_NAME#v} \
+              --console=plain --stacktrace
+            .github/actions/tools/uploadToCentral.sh \
+              -p '${{ secrets.CENTRAL_PASSWORD }}' \
+              -u '${{ secrets.CENTRAL_USERNAME }}'
+          fi
+
+      - name: Publish to GitHub Packages
+        run: |
+          export ANDROID_NDK="$ANDROID_SDK_ROOT/ndk/$ANDROID_NDK_VERSION"
+          if [ "${{ secrets.SIGNING_PASSWORD }}" = "" ];
+          then
+            ./gradlew publishMavenPublicationToDistRepository \
+              -PreleaseVersion=${GITHUB_REF_NAME#v} \
+              --console=plain --stacktrace
+          else
+            ./gradlew publishMavenPublicationToDistRepository \
+              -PsigningKey='${{ secrets.SIGNING_KEY }}' \
+              -PsigningPassword='${{ secrets.SIGNING_PASSWORD }}' \
+              -PreleaseVersion=${GITHUB_REF_NAME#v} \
+              --console=plain --stacktrace
+          fi
+
+          source .github/actions/tools/uploadToMaven.sh
+          registry="https://maven.pkg.github.com/$GITHUB_REPOSITORY"
+          echo "Deploy to github package registry $registry"
+          uploadAllToMaven build/dist/maven/ "$registry" "token" "${{ secrets.GITHUB_TOKEN }}"

@@ -1,0 +1,47 @@
+// build file for native buffer allocator, created by pavl_g on 5/17/22.
+
+// directories for native source
+String bufferAllocatorAndroidPath = 'src/native/jme_bufferallocator'
+String bufferAllocatorHeaders = 'src/native/headers'
+
+// directories for build
+String bufferAllocatorBuildDir = "$buildDir" + File.separator + "bufferallocator"
+String bufferAllocatorJniDir = bufferAllocatorBuildDir + File.separator + "jni"
+String bufferAllocatorHeadersBuildDir = bufferAllocatorJniDir + File.separator + "headers"
+String bufferAllocatorBuildLibsDir = bufferAllocatorBuildDir + File.separator + "libs"
+
+// copy native src to build dir
+task copyJmeBufferAllocator(type: Copy) {
+    from file(bufferAllocatorAndroidPath)
+    into file(bufferAllocatorJniDir)
+}
+
+// copy native headers to build dir
+task copyJmeHeadersBufferAllocator(type: Copy, dependsOn: copyJmeBufferAllocator) {
+    from file(bufferAllocatorHeaders)
+    into file(bufferAllocatorHeadersBuildDir)
+}
+
+// compile and build copied natives in build dir
+task buildBufferAllocatorNativeLib(type: Exec, dependsOn: [copyJmeBufferAllocator, copyJmeHeadersBufferAllocator]) {
+    dependsOn validateAndroidNdk
+    workingDir bufferAllocatorBuildDir
+    executable rootProject.ndkCommandPath
+    args(
+        "APP_ABI=${rootProject.ext.androidAbis.join(',')}",
+        "APP_PLATFORM=${rootProject.ext.androidPlatform}",
+        "-j${Runtime.runtime.availableProcessors()}"
+    )
+}
+compileJava.dependsOn buildBufferAllocatorNativeLib
+
+// package the native object files inside the lib folder in a production jar
+jar.into("lib") { from bufferAllocatorBuildLibsDir }
+jar.doFirst {
+    rootProject.ext.androidAbis.each { abi ->
+        def nativeLib = file("${bufferAllocatorBuildLibsDir}/${abi}/libbufferallocatorjme.so")
+        if (!nativeLib.isFile()) {
+            throw new GradleException("Missing buffer allocator native library: ${nativeLib}. Run assemble with an Android NDK available.")
+        }
+    }
+}

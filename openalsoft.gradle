@@ -1,0 +1,198 @@
+// OpenAL Soft r1.21.1
+// TODO: update URL to jMonkeyEngine fork once it's updated with latest kcat's changes
+String openALSoftUrl = 'https://github.com/kcat/openal-soft/archive/1.24.3.zip'
+String openALSoftZipFile = 'OpenALSoft.zip'
+
+// OpenAL Soft directory the download is extracted into
+// Typically, the downloaded OpenAL Soft zip file will extract to a directory
+// called "openal-soft"
+String openALSoftFolder = 'openal-soft-1.24.3'
+
+// Working directories for the ndk build.
+String openalsoftBuildDir = "${buildDir}" + File.separator + 'openalsoft'
+String openalsoftClassesBuildDir = "${buildDir}" + File.separator + 'openalsoft_classes'
+String openalsoftBuildJniDir = openalsoftBuildDir + File.separator + 'jni'
+String openalsoftBuildLibsDir = openalsoftBuildDir + File.separator + 'libs'
+
+// jME Android Native source files path
+String openalsoftJmeAndroidPath = 'src/native/jme_openalsoft'
+String jmeHeaders = 'src/native/headers'
+
+// Download external source files if not available
+task downloadOpenALSoft(type: MyDownload) {
+    sourceUrl = openALSoftUrl
+    target = file(openalsoftBuildDir + File.separator + openALSoftZipFile)
+}
+
+// Unzip external source files
+task unzipOpenALSoft(type: Copy) {
+    def zipFile = file(openalsoftBuildDir + File.separator + openALSoftZipFile)
+    def outputDir = file(openalsoftBuildDir)
+
+    from zipTree(zipFile)
+    into outputDir
+}
+unzipOpenALSoft.dependsOn {
+    def zipFilePath = openalsoftBuildDir + File.separator + openALSoftZipFile
+    def zipFile = new File(zipFilePath)
+//    println "zipFile path: " + zipFile.absolutePath
+//    println "zipFile exists: " + zipFile.exists()
+    if (!zipFile.exists()) {
+        downloadOpenALSoft
+    }
+}
+
+// Copy external source files to jni directory
+task copyOpenALSoft(type: Copy) {
+    def sourceDir = file(openalsoftBuildDir + File.separator + openALSoftFolder)
+    def outputDir = file(openalsoftBuildJniDir)
+//    println "copyOpenALSoft sourceDir: " + sourceDir
+//    println "copyOpenALSoft outputDir: " + outputDir
+
+    from sourceDir
+    into outputDir
+}
+copyOpenALSoft.dependsOn {
+    def openALSoftUnzipDir = new File(openalsoftBuildDir + File.separator + openALSoftFolder)
+//    println "openALSoftUnzipDir path: " + openALSoftUnzipDir.absolutePath
+//    println "openALSoftUnzipDir exists: " + openALSoftUnzipDir.isDirectory()
+    if (!openALSoftUnzipDir.isDirectory()) {
+        unzipOpenALSoft
+    }
+}
+
+// Copy JME Headers to jni directory
+task copyJmeHeadersOpenAL(type: Copy) {
+    from file(jmeHeaders)
+    into file(openalsoftBuildJniDir + File.separator + "headers")
+}
+
+// Copy jME Android native files to jni directory
+task copyJmeOpenALSoft(type: Copy, dependsOn: [copyOpenALSoft, copyJmeHeadersOpenAL]) {
+    def sourceDir = file(openalsoftJmeAndroidPath)
+    def outputDir = file(openalsoftBuildJniDir)
+//    println "copyJmeOpenALSoft sourceDir: " + sourceDir
+//    println "copyJmeOpenALSoft outputDir: " + outputDir
+
+    from sourceDir
+    into outputDir
+}
+// rootProject.ndkCommandPath must be set to your ndk-build wrapper or full ndk path.
+def ndkPath = rootProject.ndkCommandPath ? new File(rootProject.ndkCommandPath).getParent() : ''
+def cmakeToolchain = "${ndkPath}/build/cmake/android.toolchain.cmake"
+
+def openalAbis = rootProject.ext.androidAbis
+
+// 2) for each ABI, register a configure/build pair
+openalAbis.each { abi ->
+
+    // configure task
+    tasks.register("configureOpenAlSoft_${abi}", Exec) {
+        group = "external-native"
+        description = "Generate CMake build files for OpenAL-Soft [$abi]"
+
+        workingDir file("$openalsoftBuildDir/$openALSoftFolder")
+        commandLine = [
+            "cmake",
+            "-S", ".",
+            "-B", "cmake-build-${abi}",
+            "-G", "Unix Makefiles",                         // or Ninja
+            "-DCMAKE_TOOLCHAIN_FILE=${cmakeToolchain}",
+            "-DANDROID_PLATFORM=${rootProject.ext.androidPlatform}",
+            "-DANDROID_ABI=${abi}",
+            "-DCMAKE_BUILD_TYPE=Release",
+            "-DALSOFT_UTILS=OFF",
+            "-DALSOFT_EXAMPLES=OFF",
+            "-DALSOFT_TESTS=OFF",
+            "-DALSOFT_BACKEND_OPENSL=ON",
+            '-DALSOFT_SHARED=OFF',
+            '-DBUILD_SHARED_LIBS=OFF',
+            '-DALSOFT_STATIC=ON',
+            '-DLIBTYPE=STATIC',
+            '-DCMAKE_CXX_FLAGS=-stdlib=libc++'
+        ]
+
+        dependsOn validateAndroidNdk, copyOpenALSoft
+    }
+
+    // build task
+    tasks.register("buildOpenAlSoft_${abi}", Exec) {
+        group = "external-native"
+        description = "Compile OpenAL-Soft into libopenalsoft.a for [$abi]"
+
+        dependsOn "configureOpenAlSoft_${abi}"
+        workingDir file("$openalsoftBuildDir/$openALSoftFolder")
+        commandLine = [
+            "cmake",
+            "--build", "cmake-build-${abi}",
+            "--config", "Release"
+        ]
+    }
+}
+
+// 3) optional: aggregate tasks
+tasks.register("configureOpenAlSoftAll") {
+    group = "external-native"
+    description = "Configure OpenAL-Soft for all ABIs"
+    dependsOn openalAbis.collect { "configureOpenAlSoft_${it}" }
+}
+
+tasks.register("buildOpenAlSoftAll") {
+    group = "external-native"
+    description = "Build OpenAL-Soft for all ABIs"
+    dependsOn openalAbis.collect { "buildOpenAlSoft_${it}" }
+}
+
+task buildOpenAlSoftNativeLib(type: Exec) {
+    group = "external-native"
+    description = "Runs ndk-build on the JNI code, linking in the CMake-built OpenAL-Soft .a files"
+
+    dependsOn validateAndroidNdk, copyJmeOpenALSoft, buildOpenAlSoftAll
+
+    // where your Android.mk lives
+    workingDir openalsoftBuildDir
+
+    // call the NDK build script
+    executable rootProject.ndkCommandPath
+
+    // pass in all ABIs (so ndk-build will rebuild your shared .so for each one),
+    // and pass in a custom var OPENALSOFT_BUILD_DIR so your Android.mk can find 
+    // the cmake-build-<ABI> folders.
+    args(
+        // let ndk-build know which ABIs to build for
+        "APP_ABI=${rootProject.ext.androidAbis.join(',')}",
+        "APP_PLATFORM=${rootProject.ext.androidPlatform}",
+
+        // pass in the path to the CMake output root
+        "OPENALSOFT_BUILD_ROOT=${openalsoftBuildDir}/${openALSoftFolder}",
+
+        // parallel jobs
+        "-j${Runtime.runtime.availableProcessors()}"
+    )
+}
+compileJava.dependsOn buildOpenAlSoftNativeLib
+
+jar.into("lib") { from openalsoftBuildLibsDir }
+jar.doFirst {
+    rootProject.ext.androidAbis.each { abi ->
+        def nativeLib = file("${openalsoftBuildLibsDir}/${abi}/libopenalsoftjme.so")
+        if (!nativeLib.isFile()) {
+            throw new GradleException("Missing OpenAL Soft native library: ${nativeLib}. Run assemble with an Android NDK and CMake available.")
+        }
+    }
+}
+
+// Helper class to wrap ant download task
+class MyDownload extends DefaultTask {
+    @Input
+    String sourceUrl
+
+    @OutputFile
+    File target
+
+    @TaskAction
+    void download() {
+       ant.get(src: sourceUrl, dest: target)
+    }
+}
+

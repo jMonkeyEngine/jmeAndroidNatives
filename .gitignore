@@ -1,0 +1,8 @@
+.gradle/
+build/
+out/
+*.iml
+/.idea/
+
+# Native build scratch space; checked-in fallback binaries live under prebuilt/android.
+/.cxx/

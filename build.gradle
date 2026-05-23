@@ -1,0 +1,230 @@
+plugins {
+    id 'base'
+    id 'java-library'
+    id 'maven-publish'
+    id 'signing'
+}
+
+group = 'org.jmonkeyengine'
+version = providers.gradleProperty('releaseVersion')
+        .map { it.replaceFirst(/^v/, '') }
+        .orElse(providers.gradleProperty('baseVersion').map { "${it}-SNAPSHOT" })
+        .get()
+
+base {
+    archivesName = 'jme3-android-native'
+}
+
+ext {
+    androidAbis = providers.gradleProperty('androidAbis')
+            .getOrElse('arm64-v8a,x86_64')
+            .split(',')
+            .collect { it.trim() }
+            .findAll { it }
+    androidPlatform = providers.gradleProperty('androidPlatform').getOrElse('android-21').trim()
+    ndkCommandPath = ''
+    ndkExists = false
+}
+
+if (androidAbis.isEmpty()) {
+    throw new GradleException('androidAbis must contain at least one Android ABI.')
+}
+if (!androidPlatform.startsWith('android-')) {
+    throw new GradleException("androidPlatform must look like 'android-21', but was '${androidPlatform}'.")
+}
+
+repositories {
+    mavenCentral()
+    google()
+}
+
+java {
+    sourceCompatibility = JavaVersion.VERSION_1_8
+    targetCompatibility = JavaVersion.VERSION_1_8
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(21)
+        vendor = JvmVendorSpec.ADOPTIUM
+    }
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+    options.release = 8
+}
+
+def findAndroidNdkDirs(File sdkDir) {
+    def ndkDirs = []
+    def nestedSdkDir = new File(sdkDir, 'Sdk')
+    if (nestedSdkDir.isDirectory()) {
+        ndkDirs.addAll(findAndroidNdkDirs(nestedSdkDir))
+    }
+    def sideBySideDir = new File(sdkDir, 'ndk')
+    if (sideBySideDir.isDirectory()) {
+        ndkDirs.addAll(sideBySideDir.listFiles()?.findAll { it.isDirectory() }?.sort { a, b -> b.name <=> a.name } ?: [])
+    }
+    ndkDirs << new File(sdkDir, 'ndk-bundle')
+    return ndkDirs
+}
+
+def configureAndroidNdk = {
+    def ndkBuildFile = System.properties['os.name'].toLowerCase().contains('windows') ? 'ndk-build.cmd' : 'ndk-build'
+    def ndkCandidates = []
+
+    if (System.env.ANDROID_NDK) {
+        ndkCandidates << file(System.env.ANDROID_NDK)
+    }
+    if (System.env.ANDROID_NDK_HOME) {
+        ndkCandidates << file(System.env.ANDROID_NDK_HOME)
+    }
+    if (project.hasProperty('ndkPath') && ndkPath) {
+        ndkCandidates << file(ndkPath)
+    }
+
+    def localProperties = file('local.properties')
+    if (localProperties.isFile()) {
+        Properties properties = new Properties()
+        localProperties.withInputStream { properties.load(it) }
+        if (properties.getProperty('ndk.dir')) {
+            ndkCandidates << file(properties.getProperty('ndk.dir'))
+        }
+        if (properties.getProperty('sdk.dir')) {
+            ndkCandidates.addAll(findAndroidNdkDirs(file(properties.getProperty('sdk.dir'))))
+        }
+    }
+
+    if (System.env.ANDROID_HOME) {
+        ndkCandidates.addAll(findAndroidNdkDirs(file(System.env.ANDROID_HOME)))
+    }
+    if (System.env.ANDROID_SDK_ROOT) {
+        ndkCandidates.addAll(findAndroidNdkDirs(file(System.env.ANDROID_SDK_ROOT)))
+    }
+    ndkCandidates.addAll(findAndroidNdkDirs(file("${System.properties['user.home']}/Android/Sdk")))
+
+    def ndkBuildPath = ndkCandidates.collect { new File(it, ndkBuildFile) }.find { it.isFile() }
+    if (ndkBuildPath != null) {
+        ndkExists = true
+        ndkCommandPath = ndkBuildPath.absolutePath
+    }
+}
+configureAndroidNdk()
+
+tasks.register('validateAndroidNdk') {
+    doLast {
+        if (!ndkExists) {
+            throw new GradleException('Building jmeAndroidNatives requires an Android NDK. Set ANDROID_NDK, ANDROID_NDK_HOME, ANDROID_SDK_ROOT, or -PndkPath.')
+        }
+    }
+}
+
+sourceSets {
+    main {
+        java {
+            srcDirs = []
+        }
+    }
+}
+
+jar {
+    manifest {
+        attributes 'Implementation-Title': 'jmeAndroidNatives',
+                   'Implementation-Version': project.version,
+                   'Automatic-Module-Name': 'org.jmonkeyengine.android.natives',
+                   'Created-By': "${JavaVersion.current()} (${System.getProperty('java.vendor')})"
+    }
+}
+
+tasks.register('sourcesJar', Jar) {
+    archiveClassifier = 'sources'
+    from 'src/native'
+    from('openalsoft.gradle')
+    from('bufferallocator.gradle')
+}
+
+tasks.register('javadocJar', Jar) {
+    archiveClassifier = 'javadoc'
+    from 'README.md'
+}
+
+tasks.named('assemble') {
+    dependsOn tasks.named('sourcesJar'), tasks.named('javadocJar')
+}
+
+publishing {
+    publications {
+        maven(MavenPublication) {
+            artifactId = 'jme3-android-native'
+            from components.java
+            artifact tasks.named('sourcesJar')
+            artifact tasks.named('javadocJar')
+            pom {
+                name = POM_NAME
+                description = POM_DESCRIPTION
+                url = POM_URL
+                inceptionYear = POM_INCEPTION_YEAR
+                scm {
+                    url = POM_SCM_URL
+                    connection = POM_SCM_CONNECTION
+                    developerConnection = POM_SCM_DEVELOPER_CONNECTION
+                }
+                licenses {
+                    license {
+                        name = POM_LICENSE_NAME
+                        url = POM_LICENSE_URL
+                        distribution = POM_LICENSE_DISTRIBUTION
+                    }
+                }
+                developers {
+                    developer {
+                        id = 'jMonkeyEngine'
+                        name = 'jMonkeyEngine Team'
+                    }
+                }
+            }
+        }
+    }
+
+    repositories {
+        maven {
+            name = 'Dist'
+            url = layout.buildDirectory.dir('dist/maven')
+        }
+        maven {
+            credentials {
+                username = gradle.rootProject.hasProperty('centralUsername') ? centralUsername : 'Unknown user'
+                password = gradle.rootProject.hasProperty('centralPassword') ? centralPassword : 'Unknown password'
+            }
+            name = 'Central'
+            url = 'https://ossrh-staging-api.central.sonatype.com/service/local/staging/deploy/maven2/'
+        }
+        maven {
+            credentials {
+                username = gradle.rootProject.hasProperty('centralUsername') ? centralUsername : 'Unknown user'
+                password = gradle.rootProject.hasProperty('centralPassword') ? centralPassword : 'Unknown password'
+            }
+            name = 'SNAPSHOT'
+            url = 'https://central.sonatype.com/repository/maven-snapshots/'
+        }
+    }
+}
+
+publishToMavenLocal.doLast {
+    println "published jme3-android-native-${project.version} to mavenLocal"
+}
+
+tasks.register('install') {
+    dependsOn 'publishToMavenLocal'
+}
+
+signing {
+    def signingKey = gradle.rootProject.findProperty('signingKey')
+    def signingPassword = gradle.rootProject.findProperty('signingPassword')
+    useInMemoryPgpKeys(signingKey, signingPassword)
+    sign publishing.publications.maven
+}
+
+tasks.withType(Sign).configureEach {
+    onlyIf { gradle.rootProject.hasProperty('signingKey') }
+}
+
+apply from: file('openalsoft.gradle')
+apply from: file('bufferallocator.gradle')
