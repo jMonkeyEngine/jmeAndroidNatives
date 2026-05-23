@@ -12,6 +12,10 @@ on:
 permissions:
   contents: read
 
+defaults:
+  run:
+    shell: bash
+
 jobs:
   BuildAndroidNatives:
     name: Build Android natives
@@ -85,15 +89,15 @@ jobs:
 
       - name: Publish snapshot to Sonatype
         run: |
-          if [ "${{ secrets.CENTRAL_PASSWORD }}" = "" ];
+          if [ "${{ secrets.OSSRH_PASSWORD }}" = "" ];
           then
             echo "Configure the following secrets to enable uploading to Sonatype:"
-            echo "CENTRAL_PASSWORD, CENTRAL_USERNAME, SIGNING_KEY, SIGNING_PASSWORD"
+            echo "OSSRH_PASSWORD, OSSRH_USERNAME, SIGNING_KEY, SIGNING_PASSWORD"
           else
             export ANDROID_NDK="$ANDROID_SDK_ROOT/ndk/$ANDROID_NDK_VERSION"
             ./gradlew publishMavenPublicationToSNAPSHOTRepository \
-              -PcentralPassword=${{ secrets.CENTRAL_PASSWORD }} \
-              -PcentralUsername=${{ secrets.CENTRAL_USERNAME }} \
+              -PcentralPassword=${{ secrets.OSSRH_PASSWORD }} \
+              -PcentralUsername=${{ secrets.OSSRH_USERNAME }} \
               -PsigningKey='${{ secrets.SIGNING_KEY }}' \
               -PsigningPassword='${{ secrets.SIGNING_PASSWORD }}' \
               --console=plain --stacktrace
@@ -130,22 +134,22 @@ jobs:
 
       - name: Stage release artifacts for Central
         run: |
-          if [ "${{ secrets.CENTRAL_PASSWORD }}" = "" ];
+          if [ "${{ secrets.OSSRH_PASSWORD }}" = "" ];
           then
             echo "Configure the following secrets to enable uploading to Sonatype:"
-            echo "CENTRAL_PASSWORD, CENTRAL_USERNAME, SIGNING_KEY, SIGNING_PASSWORD"
+            echo "OSSRH_PASSWORD, OSSRH_USERNAME, SIGNING_KEY, SIGNING_PASSWORD"
           else
             export ANDROID_NDK="$ANDROID_SDK_ROOT/ndk/$ANDROID_NDK_VERSION"
             ./gradlew publishMavenPublicationToCentralRepository \
-              -PcentralPassword=${{ secrets.CENTRAL_PASSWORD }} \
-              -PcentralUsername=${{ secrets.CENTRAL_USERNAME }} \
+              -PcentralPassword=${{ secrets.OSSRH_PASSWORD }} \
+              -PcentralUsername=${{ secrets.OSSRH_USERNAME }} \
               -PsigningKey='${{ secrets.SIGNING_KEY }}' \
               -PsigningPassword='${{ secrets.SIGNING_PASSWORD }}' \
               -PreleaseVersion=${GITHUB_REF_NAME#v} \
               --console=plain --stacktrace
             .github/actions/tools/uploadToCentral.sh \
-              -p '${{ secrets.CENTRAL_PASSWORD }}' \
-              -u '${{ secrets.CENTRAL_USERNAME }}'
+              -p '${{ secrets.OSSRH_PASSWORD }}' \
+              -u '${{ secrets.OSSRH_USERNAME }}'
           fi
 
       - name: Publish to GitHub Packages
