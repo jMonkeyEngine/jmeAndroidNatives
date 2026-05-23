@@ -3,6 +3,7 @@ plugins {
     id 'com.android.library' version '9.1.0'
     id 'maven-publish'
     id 'signing'
+    id 'io.github.gradle-nexus.publish-plugin' version '2.0.0'
 }
 
 group = 'org.jmonkeyengine'
@@ -206,28 +207,19 @@ publishing {
                 username = gradle.rootProject.hasProperty('centralUsername') ? centralUsername : 'Unknown user'
                 password = gradle.rootProject.hasProperty('centralPassword') ? centralPassword : 'Unknown password'
             }
-            name = 'Central'
-            url = 'https://ossrh-staging-api.central.sonatype.com/service/local/staging/deploy/maven2/'
-        }
-        maven {
-            credentials {
-                username = gradle.rootProject.hasProperty('centralUsername') ? centralUsername : 'Unknown user'
-                password = gradle.rootProject.hasProperty('centralPassword') ? centralPassword : 'Unknown password'
-            }
             name = 'SNAPSHOT'
             url = 'https://central.sonatype.com/repository/maven-snapshots/'
         }
-        maven {
-            name = 'GitHubPackages'
-            url = uri("https://maven.pkg.github.com/${providers.environmentVariable('GITHUB_REPOSITORY').getOrElse('jMonkeyEngine/jmeAndroidNatives')}")
-            credentials {
-                username = providers.gradleProperty('githubPackagesUsername')
-                        .orElse(providers.environmentVariable('GITHUB_ACTOR'))
-                        .getOrElse('Unknown user')
-                password = providers.gradleProperty('githubPackagesPassword')
-                        .orElse(providers.environmentVariable('GITHUB_TOKEN'))
-                        .getOrElse('Unknown password')
-            }
+    }
+}
+
+nexusPublishing {
+    repositories {
+        sonatype {
+            nexusUrl.set(uri('https://ossrh-staging-api.central.sonatype.com/service/local/'))
+            snapshotRepositoryUrl.set(uri('https://central.sonatype.com/repository/maven-snapshots/'))
+            username.set(gradle.rootProject.findProperty('centralUsername') ?: '')
+            password.set(gradle.rootProject.findProperty('centralPassword') ?: '')
         }
     }
 }

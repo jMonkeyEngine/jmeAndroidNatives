@@ -112,7 +112,6 @@ jobs:
     if: github.event_name == 'release'
     permissions:
       contents: read
-      packages: write
 
     steps:
       - name: Checkout
@@ -132,7 +131,7 @@ jobs:
           apt-get install -y cmake
           cmake --version
 
-      - name: Stage release artifacts for Central
+      - name: Publish release to Maven Central
         run: |
           if [ "${{ secrets.OSSRH_PASSWORD }}" = "" ];
           then
@@ -140,31 +139,11 @@ jobs:
             echo "OSSRH_PASSWORD, OSSRH_USERNAME, SIGNING_KEY, SIGNING_PASSWORD"
           else
             export ANDROID_NDK="$ANDROID_SDK_ROOT/ndk/$ANDROID_NDK_VERSION"
-            ./gradlew publishMavenPublicationToCentralRepository \
+            ./gradlew publishToSonatype closeAndReleaseSonatypeStagingRepository \
               -PcentralPassword=${{ secrets.OSSRH_PASSWORD }} \
               -PcentralUsername=${{ secrets.OSSRH_USERNAME }} \
               -PsigningKey='${{ secrets.SIGNING_KEY }}' \
               -PsigningPassword='${{ secrets.SIGNING_PASSWORD }}' \
               -PreleaseVersion=${GITHUB_REF_NAME#v} \
-              --console=plain --stacktrace
-          fi
-
-      - name: Publish to GitHub Packages
-        run: |
-          export ANDROID_NDK="$ANDROID_SDK_ROOT/ndk/$ANDROID_NDK_VERSION"
-          if [ "${{ secrets.SIGNING_PASSWORD }}" = "" ];
-          then
-            ./gradlew publishMavenPublicationToGitHubPackagesRepository \
-              -PreleaseVersion=${GITHUB_REF_NAME#v} \
-              -PgithubPackagesUsername='${{ github.actor }}' \
-              -PgithubPackagesPassword='${{ secrets.GITHUB_TOKEN }}' \
-              --console=plain --stacktrace
-          else
-            ./gradlew publishMavenPublicationToGitHubPackagesRepository \
-              -PsigningKey='${{ secrets.SIGNING_KEY }}' \
-              -PsigningPassword='${{ secrets.SIGNING_PASSWORD }}' \
-              -PreleaseVersion=${GITHUB_REF_NAME#v} \
-              -PgithubPackagesUsername='${{ github.actor }}' \
-              -PgithubPackagesPassword='${{ secrets.GITHUB_TOKEN }}' \
               --console=plain --stacktrace
           fi
