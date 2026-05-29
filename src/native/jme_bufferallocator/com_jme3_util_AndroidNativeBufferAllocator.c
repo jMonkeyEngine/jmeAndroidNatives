@@ -51,6 +51,7 @@
 #include <stdlib.h>
 #include <stdbool.h>
 #include <errno.h>
+#include <stdint.h>
 
 #ifndef NDEBUG
 #include <android/log.h>
@@ -83,6 +84,27 @@ JNIEXPORT void JNICALL Java_com_jme3_util_AndroidNativeBufferAllocator_releaseDi
     // avoid accessing this memory space by resetting the memory address
     buffer = NULL;
     LOG(ANDROID_LOG_INFO, "Buffer mem_address formatted (mem_address, size) -> (%p, %u)", buffer, sizeof(buffer));
+}
+
+JNIEXPORT void JNICALL Java_com_jme3_util_AndroidNativeBufferAllocator_releaseDirectByteBufferAddress
+(JNIEnv * env, jobject object, jlong address)
+{
+    (void)env;
+    (void)object;
+    void* buffer = (void*)(uintptr_t) address;
+    free(buffer);
+    LOG(ANDROID_LOG_INFO, "Buffer released by address (mem_address) -> (%p)", buffer);
+}
+
+JNIEXPORT jlong JNICALL Java_com_jme3_util_AndroidNativeBufferAllocator_directBufferAddress
+(JNIEnv * env, jobject object, jobject bufferObject)
+{
+    (void)object;
+    if (bufferObject == NULL) {
+        return 0;
+    }
+    void* buffer = (*env)->GetDirectBufferAddress(env, bufferObject);
+    return (jlong)(uintptr_t) buffer;
 }
 
 JNIEXPORT jobject JNICALL Java_com_jme3_util_AndroidNativeBufferAllocator_createDirectByteBuffer

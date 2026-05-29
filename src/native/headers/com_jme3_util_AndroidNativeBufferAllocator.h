@@ -17,6 +17,22 @@ JNIEXPORT void JNICALL Java_com_jme3_util_AndroidNativeBufferAllocator_releaseDi
 
 /*
  * Class:     com_jme3_util_AndroidNativeBufferAllocator
+ * Method:    releaseDirectByteBufferAddress
+ * Signature: (J)V
+ */
+JNIEXPORT void JNICALL Java_com_jme3_util_AndroidNativeBufferAllocator_releaseDirectByteBufferAddress
+  (JNIEnv *, jobject, jlong);
+
+/*
+ * Class:     com_jme3_util_AndroidNativeBufferAllocator
+ * Method:    directBufferAddress
+ * Signature: (Ljava/nio/Buffer;)J
+ */
+JNIEXPORT jlong JNICALL Java_com_jme3_util_AndroidNativeBufferAllocator_directBufferAddress
+  (JNIEnv *, jobject, jobject);
+
+/*
+ * Class:     com_jme3_util_AndroidNativeBufferAllocator
  * Method:    createDirectByteBuffer
  * Signature: (J)Ljava/nio/ByteBuffer;
  */
